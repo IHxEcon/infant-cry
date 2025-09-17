@@ -1,10 +1,17 @@
 import requests
 
-# Replace this with your ngrok public URL
-url = "https://3e9d93b935c2.ngrok-free.app/predict"
+# Change this to your Render URL after deployment
+API_URL = "http://127.0.0.1:5000/predict"   # local Flask
+# API_URL = "https://your-app-name.onrender.com/predict"  # render URL
 
-# Replace 'test_audio.wav' with the path to your audio file
-files = {"file": open("data/not_cry/27n.ogg", "rb")}
+# Path to an audio file for testing
+audio_file = "data/cry/1c.wav"
 
-response = requests.post(url, files=files)
-print(response.json())
+# Send file to API
+with open(audio_file, "rb") as f:
+    files = {"file": f}
+    response = requests.post(API_URL, files=files)
+
+# Print the API response
+print("Status Code:", response.status_code)
+print("Response:", response.json())
