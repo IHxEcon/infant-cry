@@ -3,28 +3,31 @@ import os
 import numpy as np
 import librosa
 from tensorflow.keras.models import load_model
-from tensorflow.keras.utils import to_categorical
-from sklearn.preprocessing import LabelEncoder
+from pydub import AudioSegment
+import tempfile
 
-# ===============================
-# STEP 0: Setup
-# ===============================
 app = Flask(__name__)
 
-# Load trained model
 MODEL_PATH = "cry_detector.keras"
 model = load_model(MODEL_PATH)
-print("✅ Model loaded successfully.")
 
-# Labels encoder
-encoder = LabelEncoder()
-encoder.fit(["not_cry", "cry"])
+# Convert any audio file to WAV
+def convert_to_wav(file_path):
+    audio = AudioSegment.from_file(file_path)  # supports mp3, wav, pcm, etc.
+    # Normalize audio to -20 dBFS
+    audio = audio.apply_gain(-20.0 - audio.dBFS)
+    temp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    audio.export(temp_wav.name, format="wav")
+    return temp_wav.name
 
-# ===============================
-# STEP 1: Feature Extraction
-# ===============================
+# Extract features for prediction
 def extract_features(file_path, max_pad_len=174):
+    file_path = convert_to_wav(file_path)
     audio, sr = librosa.load(file_path, sr=16000, res_type='kaiser_fast')
+    # Trim silent edges
+    audio, _ = librosa.effects.trim(audio, top_db=20)
+    # Normalize amplitude
+    audio = audio / np.max(np.abs(audio)) if np.max(np.abs(audio)) > 0 else audio
     mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=40)
     if mfccs.shape[1] < max_pad_len:
         pad_width = max_pad_len - mfccs.shape[1]
@@ -33,47 +36,39 @@ def extract_features(file_path, max_pad_len=174):
         mfccs = mfccs[:, :max_pad_len]
     return mfccs
 
-# ===============================
-# STEP 2: API Endpoints
-# ===============================
 @app.route("/")
 def home():
-    return {"message": "Infant cry detection API is running 🚀"}
+    return {"message": "Infant Cry Detection API is running 🚀"}
 
 @app.route("/predict", methods=["POST"])
 def predict():
     if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+        return jsonify({"error": "No audio file uploaded"}), 400
 
     file = request.files["file"]
-
-    # Save temp file
     os.makedirs("uploads", exist_ok=True)
-    filepath = os.path.join("uploads", file.filename)
-    file.save(filepath)
+    file_path = os.path.join("uploads", file.filename)
+    file.save(file_path)
 
-    # Extract features
-    mfccs = extract_features(filepath)
-    X = mfccs[np.newaxis, ..., np.newaxis]  # Add batch & channel dimension
+    try:
+        features = extract_features(file_path)
+        features = np.expand_dims(features, axis=(0, -1))  # (1, 40, 174, 1)
+        prediction = model.predict(features)
+        label_index = int(np.argmax(prediction, axis=1)[0])
+        confidence = float(np.max(prediction))
+        # Reverse logic: 1 = cry, 0 = not_cry
+        label = "cry" if label_index == 0 else "not_cry"
+        response = 1 if label_index == 0 else 0
 
-    # Predict
-    pred_probs = model.predict(X)[0]  # e.g., [0.02, 0.98]
-    class_index = np.argmax(pred_probs)
-    label = encoder.inverse_transform([class_index])[0]
-    confidence = float(pred_probs[class_index])
+        return jsonify({
+            "result": response,
+            "confidence": confidence,
+            "label": label
+        })
 
-    # Convert to 0/1 for ESP32
-    result = 1 if label == "cry" else 0
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    return jsonify({
-        "result": result,         # 0 or 1 for ESP32
-        "confidence": confidence, # confidence score
-        "label": label            # optional human-readable
-    })
-
-# ===============================
-# STEP 3: Run Server
-# ===============================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

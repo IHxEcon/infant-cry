@@ -1,5 +1,3 @@
-
-
 # ===============================
 # STEP 1: Imports
 # ===============================
@@ -12,32 +10,65 @@ from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
 import tensorflow as tf
+import random
 
 # ===============================
 # STEP 2: Dataset Path
 # ===============================
-DATASET_PATH = "data"  # Replace with your dataset folder path
+DATASET_PATH = "data"  # dataset folder path with "cry" and "not_cry"
 
 # ===============================
-# STEP 3: Feature Extraction (MFCC)
+# STEP 3: Audio Augmentation
 # ===============================
-def extract_features(file_path, max_pad_len=174):
+def add_noise(audio, noise_factor=0.005):
+    return audio + noise_factor * np.random.normal(0, 1, len(audio))
+
+def shift_audio(audio, shift_max=0.2):
+    shift = int(random.uniform(-shift_max, shift_max) * len(audio))
+    return np.roll(audio, shift)
+
+def change_pitch(audio, sr, n_steps=(-2, 2)):
+    return librosa.effects.pitch_shift(audio, sr=sr, n_steps=random.choice(range(n_steps[0], n_steps[1]+1)))
+
+def change_speed(audio, speed_range=(0.9, 1.1)):
+    speed = random.uniform(speed_range[0], speed_range[1])
+    return librosa.effects.time_stretch(audio, rate=speed)
+
+# ===============================
+# STEP 4: Feature Extraction (MFCC)
+# ===============================
+def extract_features(file_path, max_pad_len=174, augment=False):
     try:
         audio, sample_rate = librosa.load(file_path, sr=16000, res_type='kaiser_fast')
+
+        # Apply augmentation randomly during training
+        if augment:
+            aug_type = random.choice([0, 1, 2, 3])
+            if aug_type == 0:
+                audio = add_noise(audio)
+            elif aug_type == 1:
+                audio = shift_audio(audio)
+            elif aug_type == 2:
+                audio = change_pitch(audio, sample_rate)
+            elif aug_type == 3:
+                audio = change_speed(audio)
+
         mfccs = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
+
         # Pad / truncate
         if mfccs.shape[1] < max_pad_len:
             pad_width = max_pad_len - mfccs.shape[1]
             mfccs = np.pad(mfccs, pad_width=((0,0),(0,pad_width)), mode='constant')
         else:
             mfccs = mfccs[:, :max_pad_len]
+
         return mfccs
     except Exception as e:
         print("❌ Error processing file:", file_path, e)
         return None
 
 # ===============================
-# STEP 4: Load Dataset
+# STEP 5: Load Dataset
 # ===============================
 labels = []
 features = []
@@ -49,10 +80,19 @@ for label in ["cry", "not_cry"]:
         continue
     for file in os.listdir(folder):
         file_path = os.path.join(folder, file)
+
+        # Original feature
         mfccs = extract_features(file_path)
         if mfccs is not None:
             features.append(mfccs)
             labels.append(label)
+
+        # Augmented versions (x2 per file)
+        for _ in range(2):
+            mfccs_aug = extract_features(file_path, augment=True)
+            if mfccs_aug is not None:
+                features.append(mfccs_aug)
+                labels.append(label)
 
 X = np.array(features)
 y = np.array(labels)
@@ -61,7 +101,7 @@ print("✅ Feature shape:", X.shape)
 print("✅ Labels shape:", y.shape)
 
 # ===============================
-# STEP 5: Encode Labels
+# STEP 6: Encode Labels
 # ===============================
 encoder = LabelEncoder()
 y_encoded = encoder.fit_transform(y)
@@ -71,13 +111,13 @@ y_cat = to_categorical(y_encoded)
 X = X[..., np.newaxis]
 
 # Train-test split
-X_train, X_test, y_train, y_test = train_test_split(X, y_cat, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y_cat, test_size=0.2, random_state=42, stratify=y_cat)
 
 print("✅ Train shape:", X_train.shape, y_train.shape)
 print("✅ Test shape:", X_test.shape, y_test.shape)
 
 # ===============================
-# STEP 6: Build CNN Model
+# STEP 7: Build CNN Model
 # ===============================
 model = Sequential([
     Conv2D(32, (3,3), activation='relu', input_shape=(40, 174, 1)),
@@ -96,24 +136,24 @@ model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accur
 model.summary()
 
 # ===============================
-# STEP 7: Train Model
+# STEP 8: Train Model
 # ===============================
 history = model.fit(
     X_train, y_train,
-    epochs=20,
+    epochs=30,  # increase for better convergence
     batch_size=32,
     validation_data=(X_test, y_test)
 )
 
 # ===============================
-# STEP 8: Evaluate Model
+# STEP 9: Evaluate Model
 # ===============================
 test_loss, test_acc = model.evaluate(X_test, y_test)
 print("🎯 Test Accuracy:", test_acc)
 
 # ===============================
-# STEP 9: Save model for API usage
+# STEP 10: Save model for API usage
 # ===============================
-MODEL_PATH = "cry_detector.keras"  # or .h5
+MODEL_PATH = "cry_detector.keras"
 model.save(MODEL_PATH)
 print(f"💾 Model saved for API use: {MODEL_PATH}")
