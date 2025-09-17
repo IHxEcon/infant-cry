@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Infant Cry Detection</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Infant Cry Detection</h1>
+        <p id="model-status">Loading Model...</p>
+        <h2>Current Prediction: <span id="prediction">-</span></h2>
+        <h3>Log:</h3>
+        <ul id="log"></ul>
+    </div>
+<script src="script.js"></script>
+</body>
+</html>
